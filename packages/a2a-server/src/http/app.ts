@@ -10,10 +10,10 @@ import type { AgentCard } from '@a2a-js/sdk';
 import type { TaskStore } from '@a2a-js/sdk/server';
 import { DefaultRequestHandler, InMemoryTaskStore } from '@a2a-js/sdk/server';
 import { A2AExpressApp } from '@a2a-js/sdk/server/express'; // Import server components
-import { v4 as uuidv4 } from 'uuid';
+
 import { logger } from '../utils/logger.js';
-import type { AgentSettings } from '../types.js';
-import { GCSTaskStore, NoOpTaskStore } from '../persistence/gcs.js';
+
+import { GCSTaskStore } from '../persistence/gcs.js';
 import { CoderAgentExecutor } from '../agent/executor.js';
 import { requestStorage } from './requestStorage.js';
 
@@ -63,26 +63,21 @@ export async function createApp() {
   try {
     // loadEnvironment() is called within getConfig now
     const bucketName = process.env['GCS_BUCKET_NAME'];
-    let taskStoreForExecutor: TaskStore;
-    let taskStoreForHandler: TaskStore;
+    let taskStore: TaskStore;
 
     if (bucketName) {
       logger.info(`Using GCSTaskStore with bucket: ${bucketName}`);
-      const gcsTaskStore = new GCSTaskStore(bucketName);
-      taskStoreForExecutor = gcsTaskStore;
-      taskStoreForHandler = new NoOpTaskStore(gcsTaskStore);
+      taskStore = new GCSTaskStore(bucketName);
     } else {
       logger.info('Using InMemoryTaskStore');
-      const inMemoryTaskStore = new InMemoryTaskStore();
-      taskStoreForExecutor = inMemoryTaskStore;
-      taskStoreForHandler = inMemoryTaskStore;
+      taskStore = new InMemoryTaskStore();
     }
 
-    const agentExecutor = new CoderAgentExecutor(taskStoreForExecutor);
+    const agentExecutor = new CoderAgentExecutor();
 
     const requestHandler = new DefaultRequestHandler(
       coderAgentCard,
-      taskStoreForHandler,
+      taskStore,
       agentExecutor,
     );
 
@@ -95,73 +90,6 @@ export async function createApp() {
     expressApp = appBuilder.setupRoutes(expressApp, '');
     expressApp.use(express.json());
 
-    expressApp.post('/tasks', async (req, res) => {
-      try {
-        const taskId = uuidv4();
-        const agentSettings = req.body.agentSettings as
-          | AgentSettings
-          | undefined;
-        const contextId = req.body.contextId || uuidv4();
-        const wrapper = await agentExecutor.createTask(
-          taskId,
-          contextId,
-          agentSettings,
-        );
-        await taskStoreForExecutor.save(wrapper.toSDKTask());
-        res.status(201).json(wrapper.id);
-      } catch (error) {
-        logger.error('[CoreAgent] Error creating task:', error);
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : 'Unknown error creating task';
-        res.status(500).send({ error: errorMessage });
-      }
-    });
-
-    expressApp.get('/tasks/metadata', async (req, res) => {
-      // This endpoint is only meaningful if the task store is in-memory.
-      if (!(taskStoreForExecutor instanceof InMemoryTaskStore)) {
-        res.status(501).send({
-          error:
-            'Listing all task metadata is only supported when using InMemoryTaskStore.',
-        });
-      }
-      try {
-        const wrappers = agentExecutor.getAllTasks();
-        if (wrappers && wrappers.length > 0) {
-          const tasksMetadata = await Promise.all(
-            wrappers.map((wrapper) => wrapper.task.getMetadata()),
-          );
-          res.status(200).json(tasksMetadata);
-        } else {
-          res.status(204).send();
-        }
-      } catch (error) {
-        logger.error('[CoreAgent] Error getting all task metadata:', error);
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : 'Unknown error getting task metadata';
-        res.status(500).send({ error: errorMessage });
-      }
-    });
-
-    expressApp.get('/tasks/:taskId/metadata', async (req, res) => {
-      const taskId = req.params.taskId;
-      let wrapper = agentExecutor.getTask(taskId);
-      if (!wrapper) {
-        const sdkTask = await taskStoreForExecutor.load(taskId);
-        if (sdkTask) {
-          wrapper = await agentExecutor.reconstruct(sdkTask);
-        }
-      }
-      if (!wrapper) {
-        res.status(404).send({ error: 'Task not found' });
-        return;
-      }
-      res.json({ metadata: await wrapper.task.getMetadata() });
-    });
     return expressApp;
   } catch (error) {
     logger.error('[CoreAgent] Error during startup:', error);
