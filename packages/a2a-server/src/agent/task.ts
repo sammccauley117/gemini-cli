@@ -51,6 +51,7 @@ import type {
   TaskMetadata,
   Thought,
   ThoughtSummary,
+  AgentSettings,
 } from '../types.js';
 import type { PartUnion, Part as genAiPart } from '@google/genai';
 
@@ -65,6 +66,7 @@ export class Task {
   eventBus?: ExecutionEventBus;
   completedToolCalls: CompletedToolCall[];
   skipFinalTrueAfterInlineEdit = false;
+  agentSettings: AgentSettings;
 
   // For tool waiting logic
   private pendingToolCalls: Map<string, string> = new Map(); //toolCallId --> status
@@ -78,6 +80,7 @@ export class Task {
     id: string,
     contextId: string,
     config: Config,
+    agentSettings: AgentSettings,
     eventBus?: ExecutionEventBus,
   ) {
     this.id = id;
@@ -89,6 +92,7 @@ export class Task {
     this.taskState = 'submitted';
     this.eventBus = eventBus;
     this.completedToolCalls = [];
+    this.agentSettings = agentSettings;
     this._resetToolCompletionPromise();
     this.config.setFallbackModelHandler(
       // For a2a-server, we want to automatically switch to the fallback model
@@ -102,9 +106,26 @@ export class Task {
     id: string,
     contextId: string,
     config: Config,
+    agentSettings: AgentSettings,
     eventBus?: ExecutionEventBus,
   ): Promise<Task> {
-    return new Task(id, contextId, config, eventBus);
+    return new Task(id, contextId, config, agentSettings, eventBus);
+  }
+
+  getHistory(): Message[] {
+    // This is a simplification. A true conversion from GenAI Content[] to A2A Message[]
+    // would be needed if we were preserving all message types.
+    return this.geminiClient.getHistory().map((content) => ({
+      kind: 'message',
+      role: content.role === 'model' ? 'agent' : 'user',
+      parts: (content.parts || []).map((part) => ({
+        kind: 'text',
+        text: (part as { text: string }).text,
+      })),
+      messageId: uuidv4(),
+      taskId: this.id,
+      contextId: this.contextId,
+    }));
   }
 
   // Note: `getAllMCPServerStatuses` retrieves the status of all MCP servers for the entire
