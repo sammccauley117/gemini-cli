@@ -74,11 +74,11 @@ export function createStreamMessageRequest(
         role: string;
         parts: [{ kind: string; text: string }];
         messageId: string;
-      };
-      metadata: {
-        coderAgent: {
-          kind: string;
-          workspacePath: string;
+        metadata: {
+          coderAgent: {
+            kind: string;
+            workspacePath: string;
+          };
         };
       };
       taskId?: string;
@@ -93,11 +93,11 @@ export function createStreamMessageRequest(
         role: 'user',
         parts: [{ kind: 'text', text }],
         messageId,
-      },
-      metadata: {
-        coderAgent: {
-          kind: 'agent-settings',
-          workspacePath: '/tmp',
+        metadata: {
+          coderAgent: {
+            kind: 'agent-settings',
+            workspacePath: '/tmp',
+          },
         },
       },
     },
@@ -134,8 +134,8 @@ export function assertTaskCreationAndWorkingStatus(
   events: SendStreamingMessageSuccessResponse[],
 ) {
   // Initial task creation event
-  const taskEvent = events[0].result as SDKTask;
-  expect(taskEvent.kind).toBe('task');
+  const taskEvent = events[0].result as TaskStatusUpdateEvent;
+  expect(taskEvent.kind).toBe('status-update');
   expect(taskEvent.status.state).toBe('submitted');
 
   // Status update: working

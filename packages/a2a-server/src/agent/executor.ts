@@ -132,6 +132,11 @@ export class CoderAgentExecutor implements AgentExecutor {
     await runtimeTask.geminiClient.initialize();
 
     this.tasks.set(taskId, runtimeTask);
+    runtimeTask.setTaskStateAndPublishUpdate(
+      'submitted',
+      { kind: CoderAgentEvent.StateChangeEvent },
+      'Task created',
+    );
     if (this.taskStore) {
       await this.taskStore.save(this.toSDKTask(runtimeTask));
     }
