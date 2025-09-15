@@ -5,6 +5,7 @@
  */
 
 import type {
+  Task as SDKTask,
   TaskStatusUpdateEvent,
   SendStreamingMessageSuccessResponse,
 } from '@a2a-js/sdk';
@@ -132,11 +133,13 @@ export function assertUniqueFinalEventIsLast(
 export function assertTaskCreationAndWorkingStatus(
   events: SendStreamingMessageSuccessResponse[],
 ) {
-  // Find the first 'working' status update
-  const workingEvent = events.find(
-    (e) =>
-      e.result.kind === 'status-update' &&
-      (e.result as TaskStatusUpdateEvent).status.state === 'working',
-  )?.result as TaskStatusUpdateEvent;
-  expect(workingEvent).toBeDefined();
+  // Initial task creation event
+  const taskEvent = events[0].result as SDKTask;
+  expect(taskEvent.kind).toBe('task');
+  expect(taskEvent.status.state).toBe('submitted');
+
+  // Status update: working
+  const workingEvent = events[1].result as TaskStatusUpdateEvent;
+  expect(workingEvent.kind).toBe('status-update');
+  expect(workingEvent.status.state).toBe('working');
 }
