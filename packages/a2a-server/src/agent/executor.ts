@@ -340,8 +340,9 @@ export class CoderAgentExecutor implements AgentExecutor {
         return;
       }
     } else {
-      const agentSettings = (userMessage.metadata as any)
-        ?.coderAgent as AgentSettings;
+      const agentSettings = (
+        userMessage.metadata as { coderAgent: AgentSettings } | undefined
+      )?.coderAgent;
       if (
         !agentSettings ||
         agentSettings.kind !== CoderAgentEvent.StateAgentSettingsEvent

@@ -5,7 +5,6 @@
  */
 
 import type {
-  Task as SDKTask,
   TaskStatusUpdateEvent,
   SendStreamingMessageSuccessResponse,
 } from '@a2a-js/sdk';

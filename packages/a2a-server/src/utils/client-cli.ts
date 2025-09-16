@@ -1,4 +1,8 @@
-#!/usr/bin/env node
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 import readline from 'node:readline';
 import crypto from 'node:crypto';
@@ -19,6 +23,8 @@ import type {
 } from '@a2a-js/sdk';
 
 import { A2AClient } from '@a2a-js/sdk/client';
+import { CoderAgentEvent } from '../types.js';
+import type { AgentSettings } from '../types.js';
 
 // --- ANSI Colors ---
 const colors = {
@@ -62,7 +68,9 @@ function updatePrompt() {
   rl.setPrompt(
     colorize(
       'cyan',
-      `User (context: ${currentContextId ? currentContextId : 'none'}, task: ${currentTaskId ? currentTaskId : 'none'}): `,
+      `User (context: ${currentContextId ? currentContextId : 'none'}, task: ${
+        currentTaskId ? currentTaskId : 'none'
+      }): `,
     ),
   );
 }
@@ -217,7 +225,7 @@ async function fetchAndDisplayAgentCard() {
     // Update prompt prefix to use the fetched name
     // The prompt is set dynamically before each rl.prompt() call in the main loop
     // to reflect the current agentName if it changes (though unlikely after initial fetch).
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.log(colorize('yellow', `⚠️ Error fetching or parsing agent card`));
     throw error;
   }
@@ -303,8 +311,11 @@ async function resumeLastTaskInContext() {
         ),
       );
     }
-  } catch (error: any) {
-    console.error(colorize('red', 'Error resuming task:'), error.message);
+  } catch (error: unknown) {
+    console.error(
+      colorize('red', 'Error resuming task:'),
+      error instanceof Error ? error.message : error,
+    );
     currentTaskId = null; // Reset task id on error
   }
 }
@@ -313,25 +324,46 @@ const commands: { [key: string]: (args: string[]) => Promise<void> } = {
   '/help': async () => {
     console.log(colorize('bright', 'Available Commands:'));
     console.log(
-      `  ${colorize('cyan', '/new')}              - Start a new session (clears context and task IDs).`,
+      `  ${colorize(
+        'cyan',
+        '/new',
+      )}              - Start a new session (clears context and task IDs).`,
     );
     console.log(
-      `  ${colorize('cyan', '/enter <contextId>')} - Enter an existing context and resume the last task if it was in-flight.`,
+      `  ${colorize(
+        'cyan',
+        '/enter <contextId>',
+      )} - Enter an existing context and resume the last task if it was in-flight.`,
     );
     console.log(
-      `  ${colorize('cyan', '/status')}            - Show the current context and task IDs.`,
+      `  ${colorize(
+        'cyan',
+        '/status',
+      )}            - Show the current context and task IDs.`,
     );
     console.log(
-      `  ${colorize('cyan', '/history')}           - Fetch and display the history for the current context.`,
+      `  ${colorize(
+        'cyan',
+        '/history',
+      )}           - Fetch and display the history for the current context.`,
     );
     console.log(
-      `  ${colorize('cyan', '/gettask [taskId]')}  - Fetch details for a specific or current task.`,
+      `  ${colorize(
+        'cyan',
+        '/gettask [taskId]',
+      )}  - Fetch details for a specific or current task.`,
     );
     console.log(
-      `  ${colorize('cyan', '/cancel')}            - Cancel the current running task.`,
+      `  ${colorize(
+        'cyan',
+        '/cancel',
+      )}            - Cancel the current running task.`,
     );
     console.log(
-      `  ${colorize('cyan', '/resubscribe')}      - Resubscribe to the current task's event stream.`,
+      `  ${colorize(
+        'cyan',
+        '/resubscribe',
+      )}      - Resubscribe to the current task's event stream.`,
     );
     console.log(
       `  ${colorize('cyan', '/exit')}              - Quit the client.`,
@@ -404,8 +436,11 @@ const commands: { [key: string]: (args: string[]) => Promise<void> } = {
         console.log(`${prefix} (ID: ${message.messageId})`);
         printMessageContent(message);
       });
-    } catch (error: any) {
-      console.error(colorize('red', 'Error fetching history:'), error.message);
+    } catch (error: unknown) {
+      console.error(
+        colorize('red', 'Error fetching history:'),
+        error instanceof Error ? error.message : error,
+      );
     }
   },
   '/gettask': async (args: string[]) => {
@@ -426,8 +461,11 @@ const commands: { [key: string]: (args: string[]) => Promise<void> } = {
         colorize('green', 'Task details:'),
         JSON.stringify(response.result, null, 2),
       );
-    } catch (error: any) {
-      console.error(colorize('red', 'Error getting task:'), error.message);
+    } catch (error: unknown) {
+      console.error(
+        colorize('red', 'Error getting task:'),
+        error instanceof Error ? error.message : error,
+      );
     }
   },
   '/cancel': async () => {
@@ -448,8 +486,11 @@ const commands: { [key: string]: (args: string[]) => Promise<void> } = {
         JSON.stringify(response.result, null, 2),
       );
       currentTaskId = null; // Task is now in a final state
-    } catch (error: any) {
-      console.error(colorize('red', 'Error cancelling task:'), error.message);
+    } catch (error: unknown) {
+      console.error(
+        colorize('red', 'Error cancelling task:'),
+        error instanceof Error ? error.message : error,
+      );
     }
   },
   '/resubscribe': async () => {
@@ -466,7 +507,11 @@ const commands: { [key: string]: (args: string[]) => Promise<void> } = {
 
 // --- Main Loop ---
 async function handleStream(
-  stream: AsyncGenerator<any, void, undefined>,
+  stream: AsyncGenerator<
+    TaskStatusUpdateEvent | TaskArtifactUpdateEvent | Message | Task,
+    void,
+    undefined
+  >,
 ): Promise<void> {
   try {
     // Iterate over the events from the stream
@@ -553,7 +598,9 @@ async function handleStream(
           `${prefix} ${colorize(
             'blue',
             'ℹ️ Task Stream Event:',
-          )} ID: ${task.id}, Context: ${task.contextId}, Status: ${task.status.state}`,
+          )} ID: ${task.id}, Context: ${task.contextId}, Status: ${
+            task.status.state
+          }`,
         );
         if (task.id !== currentTaskId) {
           console.log(
@@ -600,21 +647,23 @@ async function handleStream(
     console.log(
       colorize('dim', `--- End of response stream for this input ---`),
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     const timestamp = new Date().toLocaleTimeString();
     const prefix = colorize('red', `\n${agentName} [${timestamp}] ERROR:`);
-    console.error(
-      prefix,
-      `Error communicating with agent:`,
-      error.message || error,
-    );
-    if (error.code) {
+    const errorMessage = error instanceof Error ? error.message : `${error}`;
+    console.error(prefix, `Error communicating with agent:`, errorMessage);
+    if (error && typeof error === 'object' && 'code' in error && error.code) {
       console.error(colorize('gray', `   Code: ${error.code}`));
     }
-    if (error.data) {
+    if (error && typeof error === 'object' && 'data' in error && error.data) {
       console.error(colorize('gray', `   Data: ${JSON.stringify(error.data)}`));
     }
-    if (!(error.code || error.data) && error.stack) {
+    if (
+      error instanceof Error &&
+      error.stack &&
+      !(error && typeof error === 'object' && 'code' in error && error.code) &&
+      !(error && typeof error === 'object' && 'data' in error && error.data)
+    ) {
       console.error(
         colorize('gray', error.stack.split('\n').slice(1, 3).join('\n')),
       );
@@ -667,8 +716,8 @@ async function main() {
     // Construct params for sendMessageStream
     const messageId = generateId(); // Generate a unique message ID
 
-    const messagePayload: Message = {
-      messageId: messageId,
+    const message: Message = {
+      messageId,
       kind: 'message', // Required by Message interface
       role: 'user',
       parts: [
@@ -681,25 +730,26 @@ async function main() {
 
     // Conditionally add taskId to the message payload
     if (currentTaskId) {
-      messagePayload.taskId = currentTaskId;
+      message.taskId = currentTaskId;
     }
     // Conditionally add contextId to the message payload
     if (currentContextId) {
-      messagePayload.contextId = currentContextId;
+      message.contextId = currentContextId;
     }
 
     // If this is the first message of a new task, add AgentSettings
     if (!currentTaskId) {
-      messagePayload.metadata = {
-        coderAgent: {
-          kind: 'agent-settings',
-          workspacePath: process.cwd(), // Default workspace for the test client
-        },
+      const agentSettings: AgentSettings = {
+        kind: CoderAgentEvent.StateAgentSettingsEvent,
+        workspacePath: process.cwd(), // Default workspace for the test client
+      };
+      message.metadata = {
+        coderAgent: agentSettings,
       };
     }
 
     const params: MessageSendParams = {
-      message: messagePayload,
+      message,
     };
 
     console.log(colorize('dim', 'Sending message...'));
