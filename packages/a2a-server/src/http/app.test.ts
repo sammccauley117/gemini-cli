@@ -91,6 +91,7 @@ vi.mock('@google/gemini-cli-core', async () => {
       sendMessageStream: sendMessageStreamSpy,
       getUserTier: vi.fn().mockReturnValue('free'),
       initialize: vi.fn(),
+      getHistory: vi.fn().mockReturnValue([]),
     })),
   };
 });

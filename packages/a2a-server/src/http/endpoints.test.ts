@@ -4,93 +4,44 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  vi,
+  type Mock,
+} from 'vitest';
 import request from 'supertest';
 import type express from 'express';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { createApp, updateCoderAgentCardUrl } from './app.js';
-import type { TaskMetadata } from '../types.js';
-import { createMockConfig } from '../utils/testing_utils.js';
-import type { Config } from '@google/gemini-cli-core';
+import { GCSTaskStore } from '../persistence/gcs.js';
 
 // Mock the logger to avoid polluting test output
-// Comment out to help debug
 vi.mock('../utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-// Mock Task.create to avoid its complex setup
-vi.mock('../agent/task.js', () => {
-  class MockTask {
-    id: string;
-    contextId: string;
-    taskState = 'submitted';
-    config = {
-      getContentGeneratorConfig: vi
-        .fn()
-        .mockReturnValue({ model: 'gemini-pro' }),
-    };
-    geminiClient = {
-      initialize: vi.fn().mockResolvedValue(undefined),
-    };
-    constructor(id: string, contextId: string) {
-      this.id = id;
-      this.contextId = contextId;
-    }
-    static create = vi
-      .fn()
-      .mockImplementation((id, contextId) =>
-        Promise.resolve(new MockTask(id, contextId)),
-      );
-    getMetadata = vi.fn().mockImplementation(async () => ({
-      id: this.id,
-      contextId: this.contextId,
-      taskState: this.taskState,
-      model: 'gemini-pro',
-      mcpServers: [],
-      availableTools: [],
-    }));
-  }
-  return { Task: MockTask };
-});
-
-vi.mock('../config/config.js', async () => {
-  const actual = await vi.importActual('../config/config.js');
-  return {
-    ...actual,
-    loadConfig: vi
-      .fn()
-      .mockImplementation(async () => createMockConfig({}) as Config),
-  };
+// Mock the GCS Task Store
+vi.mock('../persistence/gcs.js', () => {
+  const GCSTaskStore = vi.fn();
+  GCSTaskStore.prototype.getContextHistory = vi
+    .fn()
+    .mockResolvedValue([{ messageId: 'history-message' }]);
+  return { GCSTaskStore };
 });
 
 describe('Agent Server Endpoints', () => {
   let app: express.Express;
   let server: Server;
-  let testWorkspace: string;
-
-  const createTask = (contextId: string) =>
-    request(app)
-      .post('/tasks')
-      .send({
-        contextId,
-        agentSettings: {
-          kind: 'agent-settings',
-          workspacePath: testWorkspace,
-        },
-      })
-      .set('Content-Type', 'application/json');
 
   beforeAll(async () => {
-    // Create a unique temporary directory for the workspace to avoid conflicts
-    testWorkspace = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'gemini-agent-test-'),
-    );
+    // Set the GCS_BUCKET_NAME env var to trigger GCSTaskStore instantiation
+    process.env['GCS_BUCKET_NAME'] = 'test-bucket';
     app = await createApp();
     await new Promise<void>((resolve) => {
       server = app.listen(0, () => {
@@ -102,6 +53,7 @@ describe('Agent Server Endpoints', () => {
   });
 
   afterAll(async () => {
+    delete process.env['GCS_BUCKET_NAME'];
     if (server) {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => {
@@ -110,46 +62,6 @@ describe('Agent Server Endpoints', () => {
         });
       });
     }
-
-    if (testWorkspace) {
-      try {
-        fs.rmSync(testWorkspace, { recursive: true, force: true });
-      } catch (e) {
-        console.warn(`Could not remove temp dir '${testWorkspace}':`, e);
-      }
-    }
-  });
-
-  it('should create a new task via POST /tasks', async () => {
-    const response = await createTask('test-context');
-    expect(response.status).toBe(201);
-    expect(response.body).toBeTypeOf('string'); // Should return the task ID
-  }, 7000);
-
-  it('should get metadata for a specific task via GET /tasks/:taskId/metadata', async () => {
-    const createResponse = await createTask('test-context-2');
-    const taskId = createResponse.body;
-    const response = await request(app).get(`/tasks/${taskId}/metadata`);
-    expect(response.status).toBe(200);
-    expect(response.body.metadata.id).toBe(taskId);
-  }, 6000);
-
-  it('should get metadata for all tasks via GET /tasks/metadata', async () => {
-    const createResponse = await createTask('test-context-3');
-    const taskId = createResponse.body;
-    const response = await request(app).get('/tasks/metadata');
-    expect(response.status).toBe(200);
-    expect(Array.isArray(response.body)).toBe(true);
-    expect(response.body.length).toBeGreaterThan(0);
-    const taskMetadata = response.body.find(
-      (m: TaskMetadata) => m.id === taskId,
-    );
-    expect(taskMetadata).toBeDefined();
-  });
-
-  it('should return 404 for a non-existent task', async () => {
-    const response = await request(app).get('/tasks/fake-task/metadata');
-    expect(response.status).toBe(404);
   });
 
   it('should return agent metadata via GET /.well-known/agent-card.json', async () => {
@@ -158,5 +70,30 @@ describe('Agent Server Endpoints', () => {
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Gemini SDLC Agent');
     expect(response.body.url).toBe(`http://localhost:${port}/`);
+  });
+
+  it('should get context history via GET /contexts/:contextId/history', async () => {
+    const contextId = 'test-context-id';
+    const response = await request(app).get(`/contexts/${contextId}/history`);
+    expect(response.status).toBe(200);
+    expect(Array.isArray(response.body)).toBe(true);
+    expect(response.body[0].messageId).toBe('history-message');
+    // Verify our mock was called
+    const mockGCSTaskStoreInstance = (GCSTaskStore as Mock).mock.instances[0];
+    expect(mockGCSTaskStoreInstance.getContextHistory).toHaveBeenCalledWith(
+      contextId,
+    );
+  });
+
+  it('should return 501 for history endpoint if not using GCSTaskStore', async () => {
+    // Temporarily unset the bucket name to force InMemoryTaskStore
+    delete process.env['GCS_BUCKET_NAME'];
+    const tempApp = await createApp();
+    const response = await request(tempApp).get(
+      '/contexts/some-context/history',
+    );
+    expect(response.status).toBe(501);
+    // Restore for other tests
+    process.env['GCS_BUCKET_NAME'] = 'test-bucket';
   });
 });

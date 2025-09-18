@@ -12,6 +12,7 @@
   "main": "dist/server.js",
   "scripts": {
     "start": "node dist/src/http/server.js",
+    "start:client": "node dist/src/utils/client-cli.js",
     "build": "node ../../scripts/build_package.js",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
